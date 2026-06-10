@@ -53,15 +53,26 @@
                 <div class="login-logo"><i class="fas fa-store fa-2x"></i></div>
                 <h2 class="login-title">LaViejadeBlancaStore</h2>
                 <div class="form-group">
-                  <label>Correo:</label
-                  ><input type="email" placeholder="ejemplo@correo.com" />
+                  <label>Usuario:</label
+                  ><input
+                    type="text"
+                    id="login-usuario"
+                    placeholder="admin o cajero"
+                    autocomplete="username"
+                  />
                 </div>
                 <div class="form-group">
                   <label>Contraseña:</label
-                  ><input type="password" placeholder="********" />
+                  ><input
+                    type="password"
+                    id="login-password"
+                    placeholder="********"
+                    autocomplete="current-password"
+                  />
                 </div>
+                <p id="login-error" class="login-error hidden"></p>
                 <button id="btn-login" class="btn-primary" style="width: 100%">
-                  Iniciar Sesión
+                  Ingresar
                 </button>
               </div>
             </div>

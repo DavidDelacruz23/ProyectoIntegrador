@@ -26,6 +26,31 @@ $action = isset($_GET['action']) ? $_GET['action'] : '';
 $method = $_SERVER['REQUEST_METHOD'];
 $input = json_decode(file_get_contents("php://input"), true);
 
+// --- ACCION: LOGIN REAL CONTRA LA BASE DE DATOS ---
+if ($action === 'login' && $method === 'POST') {
+    $usuario = isset($input['usuario']) ? trim($input['usuario']) : '';
+    $password = isset($input['password']) ? $input['password'] : '';
+
+    if ($usuario === '' || $password === '') {
+        echo json_encode(["status" => false]);
+        exit;
+    }
+
+    $stmt = $conn->prepare("SELECT rol FROM usuarios WHERE usuario = ? AND password = ? LIMIT 1");
+    $stmt->bind_param("ss", $usuario, $password);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $user = $result->fetch_assoc();
+    $stmt->close();
+
+    if ($user) {
+        echo json_encode(["status" => true, "rol" => $user['rol']]);
+    } else {
+        echo json_encode(["status" => false]);
+    }
+    exit;
+}
+
 // --- ACCIÓN: OBTENER TODO EL ESTADO INICIAL ---
 if ($action === 'getAll' && $method === 'GET') {
     $categories = $conn->query("SELECT * FROM categorias")->fetch_all(MYSQLI_ASSOC);

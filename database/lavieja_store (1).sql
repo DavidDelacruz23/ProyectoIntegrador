@@ -73,6 +73,33 @@ INSERT INTO `datos_sistema` VALUES('sales', '[{\"id\":\"V1780977476362\",\"date\
 -- --------------------------------------------------------
 
 --
+-- Estructura de tabla para la tabla `usuarios`
+--
+
+DROP TABLE IF EXISTS `usuarios`;
+CREATE TABLE `usuarios` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `usuario` varchar(50) NOT NULL,
+  `rol` enum('admin','cajero') NOT NULL,
+  `password` varchar(100) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Truncar tablas antes de insertar `usuarios`
+--
+
+TRUNCATE TABLE `usuarios`;
+--
+-- Volcado de datos para la tabla `usuarios`
+--
+
+INSERT INTO `usuarios` VALUES(1, 'admin', 'admin', 'Holaaaa1!');
+INSERT INTO `usuarios` VALUES(2, 'cajero', 'cajero', 'Holaaaa1!');
+
+-- --------------------------------------------------------
+
+--
 -- Estructura de tabla para la tabla `productos`
 --
 
@@ -121,6 +148,7 @@ ALTER TABLE `datos_sistema`
 --
 ALTER TABLE `productos`
   ADD PRIMARY KEY (`id`);
+
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

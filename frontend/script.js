@@ -6,6 +6,11 @@ let deletedRecords = [];
 let incomingRecords = [];
 let cart = [];
 let chartInstances = {};
+var currentUserRole = null;
+
+const API_BASE_URL = window.location.pathname.includes("/frontend/")
+  ? "../backend/backend.php"
+  : "backend.php";
 
 let editingCategoryId = null;
 let editingProductId = null;
@@ -14,7 +19,7 @@ let editingProductId = null;
 async function initApp() {
   try {
     // Obtenemos de manera centralizada todo el estado inicial desde MySQL
-    const response = await fetch("backend.php?action=getAll");
+    const response = await fetch(`${API_BASE_URL}?action=getAll`);
     const data = await response.json();
 
     categories = data.categories || [];
@@ -43,7 +48,7 @@ async function initApp() {
 // Función auxiliar para despachar los cambios al servidor en formato JSON
 async function syncWithBackend(action, payload = {}) {
   try {
-    const response = await fetch(`backend.php?action=${action}`, {
+    const response = await fetch(`${API_BASE_URL}?action=${action}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -62,11 +67,11 @@ async function syncWithBackend(action, payload = {}) {
 const cleanData = (data) => {
   return data.map((item) => ({
     id: item.id.toString().trim(),
-    name: item.name.trim(),
-    category: capitalize(item.category.trim().toLowerCase()),
+    name: (item.name || item.nombre || "").trim(),
+    category: capitalize((item.category || item.categoria || "").trim().toLowerCase()),
     stock: isNaN(item.stock) ? 0 : parseInt(item.stock),
-    price: parseFloat(item.price),
-    brand: capitalize(item.brand.trim().toLowerCase()),
+    price: parseFloat(item.price || item.precio || 0),
+    brand: capitalize((item.brand || item.marca || "").trim().toLowerCase()),
   }));
 };
 const capitalize = (str) => str.charAt(0).toUpperCase() + str.slice(1);
@@ -79,6 +84,30 @@ const getTodayStr = () => new Date().toISOString().split("T")[0];
 
 // --- NAVEGACIÓN Y VISTAS ---
 function showView(targetId) {
+  const publicViews = ["login-view", "recover-view"];
+  const allowedViewsByRole = {
+    admin: [
+      "dashboard-view",
+      "categories-view",
+      "inventory-view",
+      "sales-view",
+      "reports-view",
+    ],
+    cajero: ["sales-view", "reports-view"],
+  };
+
+  if (!publicViews.includes(targetId) && !currentUserRole) {
+    targetId = "login-view";
+  }
+
+  if (
+    currentUserRole &&
+    !publicViews.includes(targetId) &&
+    !allowedViewsByRole[currentUserRole].includes(targetId)
+  ) {
+    targetId = currentUserRole === "cajero" ? "sales-view" : "dashboard-view";
+  }
+
   document
     .querySelectorAll(".view")
     .forEach((v) => v.classList.remove("active"));
@@ -100,27 +129,86 @@ function showView(targetId) {
   if (targetId === "inventory-view") renderInventory();
   if (targetId === "sales-view") renderPOS();
   if (targetId === "reports-view") renderReports();
+
+  updateActiveNav(targetId);
+}
+
+function updateActiveNav(targetId) {
+  document.querySelectorAll(".sidebar .nav-btn").forEach((btn) => {
+    btn.classList.toggle(
+      "active",
+      btn.getAttribute("data-target") === targetId,
+    );
+  });
+}
+
+function applyRolePermissions() {
+  const userName = document.querySelector(".user-profile .user-name");
+  if (userName) {
+    userName.innerText =
+      currentUserRole === "admin" ? "Administrador" : "Cajero";
+  }
+
+  document.querySelectorAll(".sidebar .nav-btn").forEach((btn) => {
+    const target = btn.getAttribute("data-target");
+    const isAllowedForCashier = ["sales-view", "reports-view"].includes(
+      target,
+    );
+    btn.classList.toggle(
+      "hidden",
+      currentUserRole === "cajero" && !isAllowedForCashier,
+    );
+  });
 }
 
 document.querySelectorAll(".sidebar .nav-btn").forEach((btn) => {
   btn.addEventListener("click", (e) => {
-    document
-      .querySelectorAll(".sidebar .nav-btn")
-      .forEach((b) => b.classList.remove("active"));
-    e.currentTarget.classList.add("active");
     showView(e.currentTarget.getAttribute("data-target"));
   });
 });
 
-// Login Simulado
-document.getElementById("btn-login").addEventListener("click", () => {
-  document
-    .querySelectorAll(".sidebar .nav-btn")
-    .forEach((b) => b.classList.remove("active"));
-  document
-    .querySelector('.sidebar .nav-btn[data-target="dashboard-view"]')
-    .classList.add("active");
-  showView("dashboard-view");
+async function handleLogin() {
+  const usuario = document.getElementById("login-usuario").value.trim();
+  const password = document.getElementById("login-password").value;
+  const errorBox = document.getElementById("login-error");
+
+  errorBox.classList.add("hidden");
+  errorBox.innerText = "";
+
+  if (!usuario || !password) {
+    errorBox.innerText = "Ingrese usuario y contrase\u00f1a.";
+    errorBox.classList.remove("hidden");
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}?action=login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usuario, password }),
+    });
+    const result = await response.json();
+
+    if (result.status) {
+      currentUserRole = result.rol;
+      applyRolePermissions();
+      showView(currentUserRole === "cajero" ? "sales-view" : "dashboard-view");
+    } else {
+      errorBox.innerText = "Usuario o contrase\u00f1a incorrectos.";
+      errorBox.classList.remove("hidden");
+    }
+  } catch (error) {
+    console.error("Error al iniciar sesi\u00f3n:", error);
+    errorBox.innerText = "No se pudo conectar con el servidor.";
+    errorBox.classList.remove("hidden");
+  }
+}
+
+document.getElementById("btn-login").addEventListener("click", handleLogin);
+["login-usuario", "login-password"].forEach((id) => {
+  document.getElementById(id).addEventListener("keydown", (event) => {
+    if (event.key === "Enter") handleLogin();
+  });
 });
 
 // --- GESTIÓN DE MODALES ---
