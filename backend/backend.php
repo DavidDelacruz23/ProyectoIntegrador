@@ -1,188 +1,428 @@
 <?php
 // backend.php
-header("Content-Type: application/json");
+// Backend del sistema de tienda: login y mantenimiento de categorias, productos y ventas.
+
+header("Content-Type: application/json; charset=utf-8");
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Headers: Content-Type");
 header("Access-Control-Allow-Methods: GET, POST");
 
-// 1. Conexión a la Base de Datos
+// --- CONEXION A MYSQL ---
+// Se centraliza la conexion para que todas las acciones CRUD usen la misma base lavieja_store.
 $host = "localhost";
 $user = "root";
-$pass = ""; 
+$pass = "";
 $dbname = "lavieja_store";
 
 $conn = new mysqli($host, $user, $pass, $dbname);
 
 if ($conn->connect_error) {
-    echo json_encode(["status" => false, "error" => "Conexión fallida"]);
+    echo json_encode(["status" => false, "message" => "Conexion fallida con la base de datos"]);
     exit;
 }
 
-// Configurar caracteres en UTF-8 para evitar problemas con tildes o eñes
-$conn->set_charset("utf8");
+$conn->set_charset("utf8mb4");
 
-// 2. Capturar la acción y el método HTTP
-$action = isset($_GET['action']) ? $_GET['action'] : '';
-$method = $_SERVER['REQUEST_METHOD'];
+// --- ENTRADA GENERAL ---
+// action indica la operacion solicitada y $input contiene el JSON enviado desde JavaScript.
+$action = isset($_GET["action"]) ? $_GET["action"] : "";
+$method = $_SERVER["REQUEST_METHOD"];
 $input = json_decode(file_get_contents("php://input"), true);
+if (!is_array($input)) {
+    $input = [];
+}
 
-// --- ACCION: LOGIN REAL CONTRA LA BASE DE DATOS ---
-if ($action === 'login' && $method === 'POST') {
-    $usuario = isset($input['usuario']) ? trim($input['usuario']) : '';
-    $password = isset($input['password']) ? $input['password'] : '';
+// --- RESPUESTA JSON ESTANDAR ---
+// Esta funcion evita repetir json_encode y mantiene uniforme el formato status/message/data.
+function sendJson($payload)
+{
+    echo json_encode($payload);
+    exit;
+}
 
-    if ($usuario === '' || $password === '') {
-        echo json_encode(["status" => false]);
-        exit;
+// --- LECTURA SEGURA DE CAMPOS ---
+// Retorna cadenas recortadas para validar datos obligatorios enviados por formularios.
+function fieldValue($input, $key)
+{
+    return isset($input[$key]) ? trim((string)$input[$key]) : "";
+}
+
+// --- CONSULTA DE VENTAS ---
+// Las ventas se guardan como JSON academico en datos_sistema; esta funcion las convierte a arreglo.
+function getSales($conn)
+{
+    $res = $conn->query("SELECT data_json FROM datos_sistema WHERE clave = 'sales'");
+    $row = $res ? $res->fetch_assoc() : null;
+    return $row ? json_decode($row["data_json"], true) : [];
+}
+
+// --- CONSULTA DE LOGS DE ELIMINACION ---
+// Lista logs desde la tabla nueva y mantiene compatibilidad si existen logs antiguos en datos_sistema.
+function getDeletionLogs($conn)
+{
+    $logs = [];
+    $tableCheck = $conn->query("SHOW TABLES LIKE 'logs_eliminaciones'");
+    if ($tableCheck && $tableCheck->num_rows > 0) {
+        $res = $conn->query("SELECT tipo, registro_id AS id, nombre AS name, motivo AS reason, fecha AS date FROM logs_eliminaciones ORDER BY fecha DESC");
+        $logs = $res ? $res->fetch_all(MYSQLI_ASSOC) : [];
+    }
+
+    if (count($logs) === 0) {
+        $res = $conn->query("SELECT data_json FROM datos_sistema WHERE clave = 'deletedRecords'");
+        $row = $res ? $res->fetch_assoc() : null;
+        $logs = $row ? json_decode($row["data_json"], true) : [];
+    }
+
+    return $logs ?: [];
+}
+
+// --- LOGIN REAL ---
+// Valida usuario y password contra la tabla usuarios. No se crean ni modifican perfiles.
+if ($action === "login" && $method === "POST") {
+    $usuario = fieldValue($input, "usuario");
+    $password = fieldValue($input, "password");
+
+    if ($usuario === "" || $password === "") {
+        sendJson(["status" => false, "message" => "Ingrese usuario y contrasena"]);
     }
 
     $stmt = $conn->prepare("SELECT rol FROM usuarios WHERE usuario = ? AND password = ? LIMIT 1");
     $stmt->bind_param("ss", $usuario, $password);
     $stmt->execute();
     $result = $stmt->get_result();
-    $user = $result->fetch_assoc();
+    $userData = $result->fetch_assoc();
     $stmt->close();
 
-    if ($user) {
-        echo json_encode(["status" => true, "rol" => $user['rol']]);
-    } else {
-        echo json_encode(["status" => false]);
+    if ($userData) {
+        sendJson(["status" => true, "rol" => $userData["rol"], "message" => "Login correcto"]);
     }
-    exit;
+
+    sendJson(["status" => false, "message" => "Credenciales incorrectas"]);
 }
 
-// --- ACCIÓN: OBTENER TODO EL ESTADO INICIAL ---
-if ($action === 'getAll' && $method === 'GET') {
-    $categories = $conn->query("SELECT * FROM categorias")->fetch_all(MYSQLI_ASSOC);
-    $inventory = $conn->query("SELECT * FROM productos")->fetch_all(MYSQLI_ASSOC);
-    
-    // Las tablas complejas (ventas y logs) las manejamos serializadas en JSON por simplicidad académica
-    $sales_res = $conn->query("SELECT data_json FROM datos_sistema WHERE clave = 'sales'")->fetch_assoc();
-    $deleted_res = $conn->query("SELECT data_json FROM datos_sistema WHERE clave = 'deletedRecords'")->fetch_assoc();
-    $incoming_res = $conn->query("SELECT data_json FROM datos_sistema WHERE clave = 'incomingRecords'")->fetch_assoc();
+// --- CONSULTAR CATEGORIAS ---
+// Retorna un listado basico de categorias en formato JSON para pintar la tabla del frontend.
+if ($action === "listCategories" && $method === "GET") {
+    $res = $conn->query("SELECT id, name FROM categorias ORDER BY name ASC");
+    sendJson(["status" => true, "data" => $res ? $res->fetch_all(MYSQLI_ASSOC) : []]);
+}
 
-    echo json_encode([
-        "categories" => $categories ?: [],
-        "inventory" => $inventory ?: [],
-        "sales" => $sales_res ? json_decode($sales_res['data_json'], true) : [],
-        "deletedRecords" => $deleted_res ? json_decode($deleted_res['data_json'], true) : [],
-        "incomingRecords" => $incoming_res ? json_decode($incoming_res['data_json'], true) : []
+// --- CONSULTAR PRODUCTOS ---
+// Retorna productos con alias compatibles con el JavaScript: name, category, brand, price.
+if ($action === "listProducts" && $method === "GET") {
+    $sql = "SELECT id, nombre AS name, categoria AS category, marca AS brand, precio AS price, stock FROM productos ORDER BY nombre ASC";
+    $res = $conn->query($sql);
+    sendJson(["status" => true, "data" => $res ? $res->fetch_all(MYSQLI_ASSOC) : []]);
+}
+
+// --- CONSULTAR VENTAS ---
+// Lista ventas registradas por el POS. No incluye filtros avanzados, solo listado basico.
+if ($action === "listSales" && $method === "GET") {
+    sendJson(["status" => true, "data" => getSales($conn)]);
+}
+
+// --- CONSULTAR TODO EL ESTADO INICIAL ---
+// Carga categorias, productos, ventas y logs para inicializar la aplicacion en una sola llamada.
+if ($action === "getAll" && $method === "GET") {
+    $categories = $conn->query("SELECT id, name FROM categorias ORDER BY name ASC");
+    $products = $conn->query("SELECT id, nombre AS name, categoria AS category, marca AS brand, precio AS price, stock FROM productos ORDER BY nombre ASC");
+    $incoming = $conn->query("SELECT data_json FROM datos_sistema WHERE clave = 'incomingRecords'")->fetch_assoc();
+
+    sendJson([
+        "status" => true,
+        "categories" => $categories ? $categories->fetch_all(MYSQLI_ASSOC) : [],
+        "inventory" => $products ? $products->fetch_all(MYSQLI_ASSOC) : [],
+        "sales" => getSales($conn),
+        "deletedRecords" => getDeletionLogs($conn),
+        "incomingRecords" => $incoming ? json_decode($incoming["data_json"], true) : []
     ]);
-    exit;
 }
 
-// --- ACCIÓN: GUARDAR / EDITAR CATEGORÍA ---
-if ($action === 'saveCategory' && $method === 'POST') {
-    $id = $conn->real_escape_string($input['id']);
-    $name = $conn->real_escape_string($input['name']);
-    
-    // Si viene 'oldName' significa que es una edición en cascada
-    if (isset($input['oldName'])) {
-        $oldName = $conn->real_escape_string($input['oldName']);
-        $conn->query("UPDATE productos SET categoria = '$name' WHERE categoria = '$oldName'");
+// --- ADICIONAR CATEGORIA ---
+// Inserta una categoria nueva y valida que el ID no exista previamente.
+if ($action === "addCategory" && $method === "POST") {
+    $id = fieldValue($input, "id");
+    $name = fieldValue($input, "name");
+
+    if ($id === "" || $name === "") {
+        sendJson(["status" => false, "message" => "El ID y el nombre de la categoria son obligatorios"]);
     }
 
-    $sql = "INSERT INTO categorias (id, name) VALUES ('$id', '$name') 
-            ON DUPLICATE KEY UPDATE name = '$name'";
-    echo json_encode(["status" => $conn->query($sql)]);
-    exit;
+    $stmt = $conn->prepare("SELECT id FROM categorias WHERE id = ? LIMIT 1");
+    $stmt->bind_param("s", $id);
+    $stmt->execute();
+    if ($stmt->get_result()->num_rows > 0) {
+        $stmt->close();
+        sendJson(["status" => false, "message" => "Ya existe una categoria con ese ID"]);
+    }
+    $stmt->close();
+
+    $stmt = $conn->prepare("INSERT INTO categorias (id, name) VALUES (?, ?)");
+    $stmt->bind_param("ss", $id, $name);
+    $ok = $stmt->execute();
+    $stmt->close();
+
+    sendJson(["status" => $ok, "message" => $ok ? "Categoria registrada correctamente" : "No se pudo registrar la categoria"]);
 }
 
-// --- ACCIÓN: ELIMINAR CATEGORÍA ---
-if ($action === 'deleteCategory' && $method === 'POST') {
-    $id = $conn->real_escape_string($input['id']);
-    $sql = "DELETE FROM categorias WHERE id = '$id'";
-    echo json_encode(["status" => $conn->query($sql)]);
-    exit;
-}
+// --- MODIFICAR CATEGORIA ---
+// Actualiza una categoria existente y replica el cambio de nombre en productos asociados.
+if (($action === "updateCategory" || $action === "saveCategory") && $method === "POST") {
+    $id = fieldValue($input, "id");
+    $name = fieldValue($input, "name");
+    $oldName = fieldValue($input, "oldName");
 
-// --- ACCIÓN: GUARDAR / EDITAR PRODUCTO ---
-if ($action === 'saveProduct' && $method === 'POST') {
-    $id = $conn->real_escape_string($input['id']);
-    $name = $conn->real_escape_string($input['name']);
-    $category = $conn->real_escape_string($input['category']);
-    $brand = $conn->real_escape_string($input['brand']);
-    $price = floatval($input['price']);
-    $stock = intval($input['stock']);
-
-    // Si se editó el ID del producto, borramos el registro anterior
-    if (isset($input['originalId']) && $input['originalId'] !== $id) {
-        $oldId = $conn->real_escape_string($input['originalId']);
-        $conn->query("DELETE FROM productos WHERE id = '$oldId'");
+    if ($id === "" || $name === "") {
+        sendJson(["status" => false, "message" => "El ID y el nombre de la categoria son obligatorios"]);
     }
 
-    $sql = "INSERT INTO productos (id, nombre, categoria, marca, precio, stock) 
-            VALUES ('$id', '$name', '$category', '$brand', $price, $stock) 
-            ON DUPLICATE KEY UPDATE nombre='$name', categoria='$category', marca='$brand', precio=$price, stock=$stock";
-    echo json_encode(["status" => $conn->query($sql)]);
-    exit;
+    $stmt = $conn->prepare("SELECT name FROM categorias WHERE id = ? LIMIT 1");
+    $stmt->bind_param("s", $id);
+    $stmt->execute();
+    $current = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$current) {
+        sendJson(["status" => false, "message" => "La categoria no existe"]);
+    }
+
+    $previousName = $oldName !== "" ? $oldName : $current["name"];
+
+    $stmt = $conn->prepare("UPDATE categorias SET name = ? WHERE id = ?");
+    $stmt->bind_param("ss", $name, $id);
+    $ok = $stmt->execute();
+    $stmt->close();
+
+    if ($ok && $previousName !== $name) {
+        $stmt = $conn->prepare("UPDATE productos SET categoria = ? WHERE categoria = ?");
+        $stmt->bind_param("ss", $name, $previousName);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    sendJson(["status" => $ok, "message" => $ok ? "Categoria actualizada correctamente" : "No se pudo actualizar la categoria"]);
 }
 
-// --- ACCIÓN: AUMENTAR STOCK (INGRESO) ---
-if ($action === 'addStock' && $method === 'POST') {
-    $id = $conn->real_escape_string($input['id']);
-    $stock = intval($input['stock']);
-    $log = $input['log'];
+// --- ELIMINAR CATEGORIA ---
+// Elimina una categoria solo si no tiene productos asociados y registra el motivo en logs_eliminaciones.
+if ($action === "deleteCategory" && $method === "POST") {
+    $id = fieldValue($input, "id");
+    $reason = fieldValue($input, "reason");
 
-    // Actualizar stock del producto
-    $conn->query("UPDATE productos SET stock = $stock WHERE id = '$id'");
+    if ($id === "" || $reason === "") {
+        sendJson(["status" => false, "message" => "Debe indicar categoria y motivo de eliminacion"]);
+    }
 
-    // Actualizar log de ingresos histórico
-    $res = $conn->query("SELECT data_json FROM datos_sistema WHERE clave = 'incomingRecords'")->fetch_assoc();
-    $current_logs = $res ? json_decode($res['data_json'], true) : [];
-    $current_logs[] = $log;
-    $json_clean = $conn->real_escape_string(json_encode($current_logs));
-    
-    $sql = "INSERT INTO datos_sistema (clave, data_json) VALUES ('incomingRecords', '$json_clean') 
-            ON DUPLICATE KEY UPDATE data_json = '$json_clean'";
-    echo json_encode(["status" => $conn->query($sql)]);
-    exit;
+    $stmt = $conn->prepare("SELECT name FROM categorias WHERE id = ? LIMIT 1");
+    $stmt->bind_param("s", $id);
+    $stmt->execute();
+    $category = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$category) {
+        sendJson(["status" => false, "message" => "La categoria no existe"]);
+    }
+
+    $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM productos WHERE categoria = ?");
+    $stmt->bind_param("s", $category["name"]);
+    $stmt->execute();
+    $count = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if ((int)$count["total"] > 0) {
+        sendJson(["status" => false, "message" => "No se puede eliminar: existen productos asociados"]);
+    }
+
+    $stmt = $conn->prepare("DELETE FROM categorias WHERE id = ?");
+    $stmt->bind_param("s", $id);
+    $ok = $stmt->execute();
+    $stmt->close();
+
+    if ($ok) {
+        $tipo = "categoria";
+        $stmt = $conn->prepare("INSERT INTO logs_eliminaciones (tipo, registro_id, nombre, motivo) VALUES (?, ?, ?, ?)");
+        $stmt->bind_param("ssss", $tipo, $id, $category["name"], $reason);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    sendJson(["status" => $ok, "message" => $ok ? "Categoria eliminada correctamente" : "No se pudo eliminar la categoria"]);
 }
 
-// --- ACCIÓN: ELIMINAR PRODUCTO (AUDITORÍA) ---
-if ($action === 'deleteProduct' && $method === 'POST') {
-    $id = $conn->real_escape_string($input['id']);
-    $log = $input['log'];
+// --- ADICIONAR PRODUCTO ---
+// Inserta un producto nuevo, validando ID unico, campos obligatorios y valores positivos.
+if ($action === "addProduct" && $method === "POST") {
+    $id = fieldValue($input, "id");
+    $name = fieldValue($input, "name");
+    $category = fieldValue($input, "category");
+    $brand = fieldValue($input, "brand");
+    $price = isset($input["price"]) ? (float)$input["price"] : -1;
+    $stock = isset($input["stock"]) ? (int)$input["stock"] : -1;
 
-    // Remover del inventario
-    $conn->query("DELETE FROM productos WHERE id = '$id'");
+    if ($id === "" || $name === "" || $category === "" || $brand === "" || $price <= 0 || $stock <= 0) {
+        sendJson(["status" => false, "message" => "Complete todos los campos; precio y stock deben ser positivos"]);
+    }
 
-    // Actualizar log de eliminaciones
-    $res = $conn->query("SELECT data_json FROM datos_sistema WHERE clave = 'deletedRecords'")->fetch_assoc();
-    $current_logs = $res ? json_decode($res['data_json'], true) : [];
-    $current_logs[] = $log;
-    $json_clean = $conn->real_escape_string(json_encode($current_logs));
-    
-    $sql = "INSERT INTO datos_sistema (clave, data_json) VALUES ('deletedRecords', '$json_clean') 
-            ON DUPLICATE KEY UPDATE data_json = '$json_clean'";
-    echo json_encode(["status" => $conn->query($sql)]);
-    exit;
+    $stmt = $conn->prepare("SELECT id FROM productos WHERE id = ? LIMIT 1");
+    $stmt->bind_param("s", $id);
+    $stmt->execute();
+    if ($stmt->get_result()->num_rows > 0) {
+        $stmt->close();
+        sendJson(["status" => false, "message" => "Ya existe un producto con ese ID"]);
+    }
+    $stmt->close();
+
+    $stmt = $conn->prepare("INSERT INTO productos (id, nombre, categoria, marca, precio, stock) VALUES (?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param("ssssdi", $id, $name, $category, $brand, $price, $stock);
+    $ok = $stmt->execute();
+    $stmt->close();
+
+    sendJson(["status" => $ok, "message" => $ok ? "Producto registrado correctamente" : "No se pudo registrar el producto"]);
 }
 
-// --- ACCIÓN: CONFIRMAR VENTA Y DESCUENTO DE STOCK ---
-if ($action === 'confirmSale' && $method === 'POST') {
-    $sale = $input['sale'];
-    $inventoryUpdates = $input['inventoryUpdates'];
+// --- MODIFICAR PRODUCTO ---
+// Actualiza un producto existente y valida que precio/stock sean valores correctos.
+if (($action === "updateProduct" || $action === "saveProduct") && $method === "POST") {
+    $originalId = fieldValue($input, "originalId");
+    $id = fieldValue($input, "id");
+    $name = fieldValue($input, "name");
+    $category = fieldValue($input, "category");
+    $brand = fieldValue($input, "brand");
+    $price = isset($input["price"]) ? (float)$input["price"] : -1;
+    $stock = isset($input["stock"]) ? (int)$input["stock"] : -1;
+    $lookupId = $originalId !== "" ? $originalId : $id;
 
-    // 1. Descontar stock masivo en la BD
+    if ($id === "" || $name === "" || $category === "" || $brand === "" || $price <= 0 || $stock <= 0) {
+        sendJson(["status" => false, "message" => "Complete todos los campos; precio y stock deben ser positivos"]);
+    }
+
+    $stmt = $conn->prepare("SELECT id FROM productos WHERE id = ? LIMIT 1");
+    $stmt->bind_param("s", $lookupId);
+    $stmt->execute();
+    if ($stmt->get_result()->num_rows === 0) {
+        $stmt->close();
+        sendJson(["status" => false, "message" => "El producto no existe"]);
+    }
+    $stmt->close();
+
+    if ($lookupId !== $id) {
+        $stmt = $conn->prepare("SELECT id FROM productos WHERE id = ? LIMIT 1");
+        $stmt->bind_param("s", $id);
+        $stmt->execute();
+        if ($stmt->get_result()->num_rows > 0) {
+            $stmt->close();
+            sendJson(["status" => false, "message" => "El nuevo ID ya pertenece a otro producto"]);
+        }
+        $stmt->close();
+    }
+
+    $stmt = $conn->prepare("UPDATE productos SET id = ?, nombre = ?, categoria = ?, marca = ?, precio = ?, stock = ? WHERE id = ?");
+    $stmt->bind_param("ssssdis", $id, $name, $category, $brand, $price, $stock, $lookupId);
+    $ok = $stmt->execute();
+    $stmt->close();
+
+    sendJson(["status" => $ok, "message" => $ok ? "Producto actualizado correctamente" : "No se pudo actualizar el producto"]);
+}
+
+// --- ELIMINAR PRODUCTO ---
+// Elimina un producto y guarda el motivo en logs_eliminaciones para auditoria.
+if ($action === "deleteProduct" && $method === "POST") {
+    $id = fieldValue($input, "id");
+    $reason = fieldValue($input, "reason");
+    if ($reason === "" && isset($input["log"]["reason"])) {
+        $reason = trim((string)$input["log"]["reason"]);
+    }
+
+    if ($id === "" || $reason === "") {
+        sendJson(["status" => false, "message" => "Debe indicar producto y motivo de eliminacion"]);
+    }
+
+    $stmt = $conn->prepare("SELECT nombre FROM productos WHERE id = ? LIMIT 1");
+    $stmt->bind_param("s", $id);
+    $stmt->execute();
+    $product = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$product) {
+        sendJson(["status" => false, "message" => "El producto no existe"]);
+    }
+
+    $stmt = $conn->prepare("DELETE FROM productos WHERE id = ?");
+    $stmt->bind_param("s", $id);
+    $ok = $stmt->execute();
+    $stmt->close();
+
+    if ($ok) {
+        $tipo = "producto";
+        $stmt = $conn->prepare("INSERT INTO logs_eliminaciones (tipo, registro_id, nombre, motivo) VALUES (?, ?, ?, ?)");
+        $stmt->bind_param("ssss", $tipo, $id, $product["nombre"], $reason);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    sendJson(["status" => $ok, "message" => $ok ? "Producto eliminado correctamente" : "No se pudo eliminar el producto"]);
+}
+
+// --- AUMENTAR STOCK ---
+// Mantiene el ingreso de stock y registra el movimiento en datos_sistema para reportes.
+if ($action === "addStock" && $method === "POST") {
+    $id = fieldValue($input, "id");
+    $stock = isset($input["stock"]) ? (int)$input["stock"] : -1;
+    $log = isset($input["log"]) ? $input["log"] : [];
+
+    if ($id === "" || $stock < 0) {
+        sendJson(["status" => false, "message" => "Datos de stock invalidos"]);
+    }
+
+    $stmt = $conn->prepare("UPDATE productos SET stock = ? WHERE id = ?");
+    $stmt->bind_param("is", $stock, $id);
+    $ok = $stmt->execute();
+    $stmt->close();
+
+    $res = $conn->query("SELECT data_json FROM datos_sistema WHERE clave = 'incomingRecords'");
+    $row = $res ? $res->fetch_assoc() : null;
+    $logs = $row ? json_decode($row["data_json"], true) : [];
+    $logs[] = $log;
+    $json = json_encode($logs);
+
+    $stmt = $conn->prepare("INSERT INTO datos_sistema (clave, data_json) VALUES ('incomingRecords', ?) ON DUPLICATE KEY UPDATE data_json = ?");
+    $stmt->bind_param("ss", $json, $json);
+    $stmt->execute();
+    $stmt->close();
+
+    sendJson(["status" => $ok, "message" => $ok ? "Stock actualizado correctamente" : "No se pudo actualizar el stock"]);
+}
+
+// --- ADICIONAR VENTA ---
+// Registra una venta desde el POS, descuenta stock y guarda la venta para consultas basicas.
+if ($action === "confirmSale" && $method === "POST") {
+    $sale = isset($input["sale"]) ? $input["sale"] : null;
+    $inventoryUpdates = isset($input["inventoryUpdates"]) ? $input["inventoryUpdates"] : [];
+
+    if (!$sale || !isset($sale["id"], $sale["date"], $sale["items"], $sale["total"])) {
+        sendJson(["status" => false, "message" => "Datos de venta invalidos"]);
+    }
+
     foreach ($inventoryUpdates as $prod) {
-        $pId = $conn->real_escape_string($prod['id']);
-        $pStock = intval($prod['stock']);
-        $conn->query("UPDATE productos SET stock = $pStock WHERE id = '$pId'");
+        $pId = isset($prod["id"]) ? trim((string)$prod["id"]) : "";
+        $pStock = isset($prod["stock"]) ? (int)$prod["stock"] : 0;
+        $stmt = $conn->prepare("UPDATE productos SET stock = ? WHERE id = ?");
+        $stmt->bind_param("is", $pStock, $pId);
+        $stmt->execute();
+        $stmt->close();
     }
 
-    // 2. Guardar la venta en el histórico json de la BD
-    $res = $conn->query("SELECT data_json FROM datos_sistema WHERE clave = 'sales'")->fetch_assoc();
-    $current_sales = $res ? json_decode($res['data_json'], true) : [];
-    $current_sales[] = $sale;
-    $json_clean = $conn->real_escape_string(json_encode($current_sales));
-    
-    $sql = "INSERT INTO datos_sistema (clave, data_json) VALUES ('sales', '$json_clean') 
-            ON DUPLICATE KEY UPDATE data_json = '$json_clean'";
-    
-    echo json_encode(["status" => $conn->query($sql)]);
-    exit;
+    $sales = getSales($conn);
+    $sales[] = $sale;
+    $json = json_encode($sales);
+
+    $stmt = $conn->prepare("INSERT INTO datos_sistema (clave, data_json) VALUES ('sales', ?) ON DUPLICATE KEY UPDATE data_json = ?");
+    $stmt->bind_param("ss", $json, $json);
+    $ok = $stmt->execute();
+    $stmt->close();
+
+    sendJson(["status" => $ok, "message" => $ok ? "Venta registrada correctamente" : "No se pudo registrar la venta"]);
 }
 
-echo json_encode(["status" => false, "error" => "Acción no válida"]);
+sendJson(["status" => false, "message" => "Accion no valida"]);
 ?>

@@ -68,7 +68,26 @@ TRUNCATE TABLE `datos_sistema`;
 --
 
 INSERT INTO `datos_sistema` VALUES('deletedRecords', '[{\"date\":\"2026-06-09T03:58:50.024Z\",\"id\":\"P6214\",\"name\":\"xd\",\"reason\":\"xd\"}]');
+INSERT INTO `datos_sistema` VALUES('incomingRecords', '[]');
 INSERT INTO `datos_sistema` VALUES('sales', '[{\"id\":\"V1780977476362\",\"date\":\"2026-06-09T03:57:56.362Z\",\"items\":[{\"id\":\"P6214\",\"name\":\"xd\",\"category\":\"xd\",\"qty\":4,\"price\":100}],\"totalItems\":4,\"total\":400}]');
+
+-- --------------------------------------------------------
+
+--
+-- Estructura de tabla para la tabla `logs_eliminaciones`
+-- Guarda el motivo de eliminacion de categorias y productos.
+--
+
+DROP TABLE IF EXISTS `logs_eliminaciones`;
+CREATE TABLE `logs_eliminaciones` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `tipo` enum('categoria','producto') NOT NULL,
+  `registro_id` varchar(20) NOT NULL,
+  `nombre` varchar(100) NOT NULL,
+  `motivo` varchar(255) NOT NULL,
+  `fecha` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
 

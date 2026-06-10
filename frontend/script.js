@@ -18,15 +18,8 @@ let editingProductId = null;
 // --- INICIALIZACIÓN Y PERSISTENCIA CON BACKEND (PHP + MYSQL) ---
 async function initApp() {
   try {
-    // Obtenemos de manera centralizada todo el estado inicial desde MySQL
-    const response = await fetch(`${API_BASE_URL}?action=getAll`);
-    const data = await response.json();
-
-    categories = data.categories || [];
-    inventory = cleanData(data.inventory || []);
-    sales = data.sales || [];
-    deletedRecords = data.deletedRecords || [];
-    incomingRecords = data.incomingRecords || [];
+    // Consulta inicial del mantenimiento: categorias, productos y ventas se cargan desde MySQL.
+    await loadMaintenanceData();
 
     console.log("Datos cargados exitosamente desde MySQL");
   } catch (error) {
@@ -61,6 +54,39 @@ async function syncWithBackend(action, payload = {}) {
   } catch (error) {
     console.error(`Error de red al intentar sincronizar: ${action}`, error);
   }
+}
+
+// --- CONSULTAR MANTENIMIENTO ---
+// Consulta listados simples en PHP/MySQL para categorias, productos y ventas.
+async function loadMaintenanceData() {
+  const [categoryResponse, productResponse, salesResponse, stateResponse] =
+    await Promise.all([
+      fetch(`${API_BASE_URL}?action=listCategories`),
+      fetch(`${API_BASE_URL}?action=listProducts`),
+      fetch(`${API_BASE_URL}?action=listSales`),
+      fetch(`${API_BASE_URL}?action=getAll`),
+    ]);
+
+  const categoryResult = await categoryResponse.json();
+  const productResult = await productResponse.json();
+  const salesResult = await salesResponse.json();
+  const stateResult = await stateResponse.json();
+
+  categories = categoryResult.data || [];
+  inventory = cleanData(productResult.data || []);
+  sales = salesResult.data || [];
+  deletedRecords = stateResult.deletedRecords || [];
+  incomingRecords = stateResult.incomingRecords || [];
+}
+
+// --- REFRESCAR TABLAS DINAMICAS ---
+// Se ejecuta despues de adicionar, modificar o eliminar para no recargar la pagina.
+async function refreshMaintenanceTables() {
+  await loadMaintenanceData();
+  updateCategoryDropdowns();
+  renderCategories();
+  renderInventory();
+  renderReports();
 }
 
 // --- UTILIDADES ---
@@ -268,46 +294,60 @@ window.openCategoryModal = function (id = null) {
 };
 
 window.saveCategory = async function () {
+  // Captura los datos del formulario de categorias.
   const id = document.getElementById("form-cat-id").value;
   const name = document.getElementById("form-cat-name").value.trim();
-  if (!name) return alert("El nombre es obligatorio");
+  if (!id || !name) return alert("El ID y el nombre son obligatorios");
 
   if (editingCategoryId) {
+    // MODIFICAR: abre el modal con datos actuales y envia cambios al backend.
     const catIndex = categories.findIndex((c) => c.id === editingCategoryId);
     const oldName = categories[catIndex].name;
-    categories[catIndex].name = name;
-
-    // Actualización en cascada local
-    inventory.forEach((p) => {
-      if (p.category === oldName) p.category = name;
+    const result = await syncWithBackend("updateCategory", {
+      id,
+      name,
+      oldName,
     });
-
-    // Sincronizamos la edición y el impacto en cascada hacia la BD
-    await syncWithBackend("saveCategory", { id, name, oldName });
+    if (!result || !result.status) {
+      return alert(result?.message || "No se pudo actualizar la categoria.");
+    }
   } else {
-    const newCat = { id, name };
-    categories.push(newCat);
-    await syncWithBackend("saveCategory", newCat);
+    // ADICIONAR: el backend valida que el ID no exista antes de insertar.
+    const result = await syncWithBackend("addCategory", { id, name });
+    if (!result || !result.status) {
+      return alert(result?.message || "No se pudo registrar la categoria.");
+    }
   }
 
-  updateCategoryDropdowns();
-  renderCategories();
+  // CONSULTAR: refresca la tabla dinamica sin recargar la pagina.
+  await refreshMaintenanceTables();
   closeModal("category-modal");
 };
 
 window.deleteCategory = async function (id) {
+  // Busca la categoria localmente para mostrar un mensaje claro al usuario.
   const cat = categories.find((c) => c.id === id);
-  const isInUse = inventory.some((p) => p.category === cat.name);
-  if (isInUse)
-    return alert(
-      "No puedes eliminar esta categoría porque hay productos asignados a ella.",
-    );
+  if (!cat) return alert("Categoria no encontrada.");
 
-  if (confirm(`¿Seguro que deseas eliminar la categoría ${cat.name}?`)) {
-    categories = categories.filter((c) => c.id !== id);
-    await syncWithBackend("deleteCategory", { id });
-    updateCategoryDropdowns();
-    renderCategories();
+  const isInUse = inventory.some((p) => p.category === cat.name);
+  if (isInUse) {
+    return alert(
+      "No puedes eliminar esta categoria porque hay productos asignados a ella.",
+    );
+  }
+
+  if (confirm(`¿Seguro que deseas eliminar la categoria ${cat.name}?`)) {
+    const reason = prompt("Indique el motivo de eliminacion de la categoria:");
+    if (!reason) return;
+
+    // ELIMINAR: envia ID y motivo; PHP valida asociaciones y registra el log en MySQL.
+    const result = await syncWithBackend("deleteCategory", { id, reason });
+    if (!result || !result.status) {
+      return alert(result?.message || "No se pudo eliminar la categoria.");
+    }
+
+    // CONSULTAR: actualiza la tabla en pantalla.
+    await refreshMaintenanceTables();
   }
 };
 
@@ -379,12 +419,13 @@ window.openProductModal = function (id = null) {
     document.getElementById("form-prod-name").value = "";
     document.getElementById("form-prod-brand").value = "";
     document.getElementById("form-prod-price").value = "";
-    document.getElementById("form-prod-stock").value = "0";
+    document.getElementById("form-prod-stock").value = "1";
   }
   openModal("product-modal");
 };
 
 window.saveProduct = async function () {
+  // Captura los datos escritos en el formulario/modal de productos.
   const originalId = document.getElementById("form-prod-original-id").value;
   const id = document.getElementById("form-prod-id").value.trim();
   const name = document.getElementById("form-prod-name").value.trim();
@@ -393,26 +434,33 @@ window.saveProduct = async function () {
   const price = parseFloat(document.getElementById("form-prod-price").value);
   const stock = parseInt(document.getElementById("form-prod-stock").value);
 
-  if (!id || !name || isNaN(price) || isNaN(stock)) {
+  if (!id || !name || !category || !brand || isNaN(price) || isNaN(stock) || price <= 0 || stock <= 0) {
     return alert(
-      "Complete los campos obligatorios numéricos/texto correctamente.",
+      "Complete todos los campos. El precio y el stock deben ser positivos.",
     );
   }
 
-  const newProduct = { id, name, category, brand, price, stock };
+  const productPayload = { id, name, category, brand, price, stock };
 
   if (editingProductId) {
-    const index = inventory.findIndex((p) => p.id === originalId);
-    inventory[index] = newProduct;
-    await syncWithBackend("saveProduct", { ...newProduct, originalId });
+    // MODIFICAR: envia los cambios al backend, que valida existencia y valores positivos.
+    const result = await syncWithBackend("updateProduct", {
+      ...productPayload,
+      originalId,
+    });
+    if (!result || !result.status) {
+      return alert(result?.message || "No se pudo actualizar el producto.");
+    }
   } else {
-    if (inventory.some((p) => p.id === id))
-      return alert("El ID del producto ya existe.");
-    inventory.push(newProduct);
-    await syncWithBackend("saveProduct", newProduct);
+    // ADICIONAR: el backend valida que el ID no exista antes de insertar.
+    const result = await syncWithBackend("addProduct", productPayload);
+    if (!result || !result.status) {
+      return alert(result?.message || "No se pudo registrar el producto.");
+    }
   }
 
-  renderInventory();
+  // CONSULTAR: refresca la tabla dinamica de productos sin recargar la pagina.
+  await refreshMaintenanceTables();
   closeModal("product-modal");
 };
 
@@ -445,29 +493,25 @@ window.addStockItem = async function (id) {
 };
 
 window.deleteInventoryItem = async function (id) {
+  // Confirma la eliminacion antes de enviar la accion al backend.
+  const prod = inventory.find((p) => p.id === id);
+  if (!prod) return alert("Producto no encontrado.");
+  if (!confirm(`¿Seguro que deseas eliminar el producto ${prod.name}?`)) return;
+
   const reason = prompt(
-    "Indique el motivo de la eliminación (Ej: Dañado, Fuera de catálogo):",
+    "Indique el motivo de la eliminacion (Ej: Dañado, Fuera de catalogo):",
   );
   if (!reason) return;
 
-  const prodIndex = inventory.findIndex((p) => p.id === id);
-  if (prodIndex > -1) {
-    const prod = inventory[prodIndex];
-    const deleteLog = {
-      date: new Date().toISOString(),
-      id: prod.id,
-      name: prod.name,
-      reason: reason,
-    };
-    deletedRecords.push(deleteLog);
-    inventory.splice(prodIndex, 1);
-
-    // Mandamos la orden de remover y registrar la auditoría
-    await syncWithBackend("deleteProduct", { id, log: deleteLog });
-
-    renderInventory();
-    alert("Producto eliminado del inventario.");
+  // ELIMINAR: PHP borra el producto y guarda el motivo en logs_eliminaciones.
+  const result = await syncWithBackend("deleteProduct", { id, reason });
+  if (!result || !result.status) {
+    return alert(result?.message || "No se pudo eliminar el producto.");
   }
+
+  // CONSULTAR: actualiza la tabla y los reportes con datos recientes.
+  await refreshMaintenanceTables();
+  alert("Producto eliminado del inventario.");
 };
 
 // --- RENDER DASHBOARD ---
@@ -696,50 +740,39 @@ document
       total: saleTotal,
     };
 
-    sales.push(newSale);
-
+    // ADICIONAR VENTA: se prepara la venta y se descuenta el stock localmente para enviar a PHP.
     cart.forEach((cartItem) => {
       const product = inventory.find((p) => p.id === cartItem.id);
       if (product) product.stock -= cartItem.qty;
     });
 
-    // Enviamos la venta completa y el estado actualizado del stock remanente
-    await syncWithBackend("confirmSale", {
+    // El backend guarda la venta y actualiza el stock en MySQL.
+    const result = await syncWithBackend("confirmSale", {
       sale: newSale,
       inventoryUpdates: inventory,
     });
+    if (!result || !result.status) {
+      return alert(result?.message || "No se pudo registrar la venta.");
+    }
 
     cart = [];
     alert("¡Venta registrada con éxito!");
+    await refreshMaintenanceTables();
     renderPOS();
   });
 
 // --- MÓDULO DE REPORTES ---
 function renderReports() {
-  const dateInput = document.getElementById("rep-date-input");
+  // CONSULTAR VENTAS: muestra un listado basico retornado por backend.php?action=listSales.
   const repDateTbody = document.getElementById("rep-date-tbody");
-  if (!dateInput.value) dateInput.value = getTodayStr();
-
-  const renderDateSales = (selectedDate) => {
-    if (!selectedDate) return;
-    const filteredSales = sales.filter((s) => s.date.startsWith(selectedDate));
-    repDateTbody.innerHTML = "";
-    if (filteredSales.length === 0) {
-      repDateTbody.innerHTML = `<tr><td colspan='4'>No hay ventas para la fecha seleccionada.</td></tr>`;
-    } else {
-      filteredSales.forEach((sale) => {
-        repDateTbody.innerHTML += `<tr><td>${formatDate(sale.date)}</td><td><strong>${sale.id}</strong></td><td>${sale.totalItems} unid.</td><td style="color:var(--success); font-weight:bold;">${formatMoney(sale.total)}</td></tr>`;
-      });
-    }
-  };
-
-  if (!dateInput.hasAttribute("data-listener")) {
-    dateInput.addEventListener("change", (e) =>
-      renderDateSales(e.target.value),
-    );
-    dateInput.setAttribute("data-listener", "true");
+  repDateTbody.innerHTML = "";
+  if (sales.length === 0) {
+    repDateTbody.innerHTML = `<tr><td colspan='4'>No hay ventas registradas.</td></tr>`;
+  } else {
+    sales.forEach((sale) => {
+      repDateTbody.innerHTML += `<tr><td>${formatDate(sale.date)}</td><td><strong>${sale.id}</strong></td><td>${sale.totalItems} unid.</td><td style="color:var(--success); font-weight:bold;">${formatMoney(sale.total)}</td></tr>`;
+    });
   }
-  renderDateSales(dateInput.value);
 
   const totalSalesVol = sales.reduce((sum, sale) => sum + sale.total, 0);
   const avgTicket = sales.length ? totalSalesVol / sales.length : 0;
