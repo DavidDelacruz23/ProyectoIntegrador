@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LaViejadeBlancaStore - Dashboard</title>
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-container">
+      <aside class="sidebar hidden" id="main-sidebar">
+        <div class="sidebar-header">
+          <h2><i class="fas fa-store"></i> LaViejadeBlanca</h2>
+          <p>Store Admin</p>
+        </div>
+        <nav class="sidebar-nav">
+          <button class="nav-btn" data-target="dashboard-view">
+            <i class="fas fa-chart-line"></i> <span>Dashboard</span>
+          </button>
+          <button class="nav-btn" data-target="categories-view">
+            <i class="fas fa-tags"></i> <span>Categorías</span>
+          </button>
+          <button class="nav-btn" data-target="inventory-view">
+            <i class="fas fa-box-open"></i> <span>Inventario</span>
+          </button>
+          <button class="nav-btn" data-target="sales-view">
+            <i class="fas fa-shopping-cart"></i> <span>Generar Venta</span>
+          </button>
+          <button class="nav-btn" data-target="reports-view">
+            <i class="fas fa-file-alt"></i> <span>Reportes</span>
+          </button>
+        </nav>
+      </aside>
+
+      <main class="main-content">
+        <header class="top-header hidden" id="main-header">
+          <div class="branding"><h1>Panel de Control</h1></div>
+          <div class="user-profile">
+            <span class="user-name">Administrador</span>
+            <div class="avatar"><i class="fas fa-user"></i></div>
+          </div>
+        </header>
+
+        <div class="views-container">
+          <section id="login-view" class="view full-page-view">
+            <div class="login-card-container">
+              <div class="login-card">
+                <div class="login-logo"><i class="fas fa-store fa-2x"></i></div>
+                <h2 class="login-title">LaViejadeBlancaStore</h2>
+                <div class="form-group">
+                  <label>Correo:</label
+                  ><input type="email" placeholder="ejemplo@correo.com" />
+                </div>
+                <div class="form-group">
+                  <label>Contraseña:</label
+                  ><input type="password" placeholder="********" />
+                </div>
+                <button id="btn-login" class="btn-primary" style="width: 100%">
+                  Iniciar Sesión
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section id="categories-view" class="view">
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 1.5rem;
+              "
+            >
+              <h2 style="color: var(--primary)">Gestión de Categorías</h2>
+              <button class="btn-primary" onclick="openCategoryModal()">
+                <i class="fas fa-plus"></i> Nueva Categoría
+              </button>
+            </div>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Nombre de Categoría</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="categories-tbody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="inventory-view" class="view">
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 1.5rem;
+              "
+            >
+              <h2 style="color: var(--primary)">Gestión de Inventario</h2>
+              <button class="btn-primary" onclick="openProductModal()">
+                <i class="fas fa-plus"></i> Nuevo Producto
+              </button>
+            </div>
+            <div class="table-controls" style="margin-bottom: 1rem">
+              <input
+                type="text"
+                id="inv-search"
+                placeholder="Buscar producto..."
+              />
+              <select id="inv-filter-category" class="dynamic-category-select">
+                <option value="all">Todas las Categorías</option>
+              </select>
+            </div>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Nombre</th>
+                    <th>Categoría</th>
+                    <th>Marca</th>
+                    <th>Precio</th>
+                    <th>Stock</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="inventory-tbody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="dashboard-view" class="view">
+            <div class="insights-block" id="insights-container"></div>
+            <div class="kpi-grid">
+              <div class="kpi-card">
+                <div class="kpi-icon"><i class="fas fa-dollar-sign"></i></div>
+                <div class="kpi-data">
+                  <h3>Ventas Totales</h3>
+                  <p id="kpi-total-sales">$0.00</p>
+                </div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-icon"><i class="fas fa-boxes"></i></div>
+                <div class="kpi-data">
+                  <h3>Stock Disponible</h3>
+                  <p id="kpi-total-stock">0</p>
+                </div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-icon"><i class="fas fa-star"></i></div>
+                <div class="kpi-data">
+                  <h3>Producto Estrella</h3>
+                  <p id="kpi-top-product">-</p>
+                </div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-icon"><i class="fas fa-calendar-day"></i></div>
+                <div class="kpi-data">
+                  <h3>Ingresos Hoy</h3>
+                  <p id="kpi-daily-revenue">$0.00</p>
+                </div>
+              </div>
+            </div>
+            <div class="charts-grid">
+              <div class="chart-container">
+                <h3>Ventas Reales por Categoría</h3>
+                <canvas id="categoryChart"></canvas>
+              </div>
+              <div class="chart-container">
+                <h3>Evolución de Ingresos</h3>
+                <canvas id="evolutionChart"></canvas>
+              </div>
+              <div class="chart-container">
+                <h3>Stock por Marca</h3>
+                <canvas id="brandChart"></canvas>
+              </div>
+            </div>
+          </section>
+
+          <section id="sales-view" class="view">
+            <h2 style="margin-bottom: 1rem; color: var(--primary)">
+              Punto de Venta
+            </h2>
+            <div class="pos-layout">
+              <div class="products-area">
+                <div class="pos-filters">
+                  <input
+                    type="text"
+                    id="pos-search"
+                    placeholder="Buscar productos..."
+                  />
+                  <select
+                    id="pos-filter-category"
+                    class="dynamic-category-select"
+                  >
+                    <option value="all">Todas las Categorías</option>
+                  </select>
+                </div>
+                <div class="product-grid" id="pos-product-grid"></div>
+              </div>
+              <div class="cart-area">
+                <div class="cart-header"><h3>Carrito de Venta</h3></div>
+                <div class="cart-items" id="cart-items"></div>
+                <div class="cart-summary">
+                  <div class="summary-row">
+                    <span>Subtotal:</span><span id="cart-subtotal">$0.00</span>
+                  </div>
+                  <div class="summary-row total">
+                    <span>Total:</span><span id="cart-total">$0.00</span>
+                  </div>
+                  <button id="btn-confirm-sale" class="btn-primary" disabled>
+                    Confirmar Venta <i class="fas fa-check"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section id="reports-view" class="view">
+            <h2 style="margin-bottom: 1.5rem; color: var(--primary)">
+              <i class="fas fa-file-alt"></i> Reportes del Sistema
+            </h2>
+            <div class="report-grid">
+              <div class="report-section full-width">
+                <h3>1. Ventas por Fecha</h3>
+                <div class="table-controls">
+                  <input type="date" id="rep-date-input" />
+                </div>
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha y Hora</th>
+                        <th>ID de Venta</th>
+                        <th>Cant. Artículos</th>
+                        <th>Monto Total</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rep-date-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="report-section">
+                <h3>2. Indicadores Globales</h3>
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Métrica</th>
+                        <th>Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rep-kpis-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="report-section">
+                <h3>3. Registro de Máximos</h3>
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Categoría</th>
+                        <th>Producto</th>
+                        <th>Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rep-max-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="report-section">
+                <h3>4. Registro de Mínimos</h3>
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Categoría</th>
+                        <th>Producto</th>
+                        <th>Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rep-min-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="report-section full-width">
+                <h3>5. Productos Eliminados</h3>
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>ID</th>
+                        <th>Nombre</th>
+                        <th>Motivo</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rep-deleted-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="report-section full-width">
+                <h3>6. Ingreso de Stock</h3>
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>ID</th>
+                        <th>Nombre</th>
+                        <th>Cantidad Ingresada</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rep-incoming-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div class="modal-overlay" id="category-modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="cat-modal-title">Nueva Categoría</h3>
+          <button class="close-modal" onclick="closeModal('category-modal')">
+            &times;
+          </button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="form-cat-id" />
+          <div class="form-group">
+            <label>Nombre de Categoría</label
+            ><input
+              type="text"
+              id="form-cat-name"
+              placeholder="Ej: Ropa de Verano"
+            />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeModal('category-modal')">
+            Cancelar
+          </button>
+          <button class="btn-primary" onclick="saveCategory()">
+            Guardar Categoría
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="product-modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="prod-modal-title">Nuevo Producto</h3>
+          <button class="close-modal" onclick="closeModal('product-modal')">
+            &times;
+          </button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="form-prod-original-id" />
+          <div class="form-group">
+            <label>ID (Código)</label
+            ><input type="text" id="form-prod-id" placeholder="Ej: P004" />
+          </div>
+          <div class="form-group">
+            <label>Nombre</label><input type="text" id="form-prod-name" />
+          </div>
+          <div class="form-group">
+            <label>Categoría</label
+            ><select
+              id="form-prod-category"
+              class="dynamic-category-select"
+            ></select>
+          </div>
+          <div class="form-group">
+            <label>Marca</label><input type="text" id="form-prod-brand" />
+          </div>
+          <div style="display: flex; gap: 1rem">
+            <div class="form-group" style="flex: 1">
+              <label>Precio ($)</label
+              ><input type="number" step="0.01" id="form-prod-price" />
+            </div>
+            <div class="form-group" style="flex: 1">
+              <label>Stock Inicial</label
+              ><input type="number" id="form-prod-stock" />
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeModal('product-modal')">
+            Cancelar
+          </button>
+          <button class="btn-primary" onclick="saveProduct()">
+            Guardar Producto
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
